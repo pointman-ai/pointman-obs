@@ -1,30 +1,104 @@
-# The template's `hello` extension as a Rust binary. Rename `hello` (the id, and every command, tool
-# and event name that starts with it) to start your own.
+# OBS on Pointman's machines: a recording watchdog. While OBS records, about every 15 s it holds each
+# screen capture's picture (obs-websocket v5's GetSourceScreenshot) against the real screen, and when the
+# picture hasn't changed for a minute while the screen has, it posts the frozen frame in a thread, @mentioning
+# whoever the settings say. Once per freeze, then an all-clear when its frames move again. Read-only towards OBS:
+# it sends only Get… requests, so it never changes a scene, a source, a profile or the recording.
 [extension]
-id = "hello"
-name = "Hello"
+id = "obs"
+name = "OBS"
 version = "0.1.0"
 publisher = "aurelio"
-summary = "A template: one command that writes a greeting to a file."
+summary = "A recording watchdog for OBS: if the screen capture freezes while you record, it tells you in a thread within a minute."
 node = ">=0.1,<1"
-platforms = ["macos-arm64", "macos-x86_64", "linux-x86_64", "linux-arm64"]
+platforms = ["macos-arm64", "macos-x86_64"]
 
 [run]
-command = ["bin/hello"]      # the release build, in the package's bin/
+command = ["bin/obs"]
 runtime = "binary"
 
-[permissions]
-secrets = []                 # vault names it may open, or prefixes like "hello.*"
+[detect]
+macos = ["/Applications/OBS.app"]
 
-[[commands]]
-kind = "hello.greet"
-title = "Greet"
-params = {type = "object", properties = {name = {type = "string"}}, required = ["name"]}
-lane = "main"                # commands in a lane run one at a time
+[permissions]
+network = true                   # OBS's WebSocket server, on this machine
+secrets = ["obs.*"]              # OBS's WebSocket password, kept in the vault as obs.<label>
+
+# OBS 28 and later: Tools › WebSocket Server Settings › Show Connect Info. Not needed when OBS's
+# authentication is off, so health asks for it only when OBS does.
+[[credentials]]
+id = "websocket"
+title = "OBS WebSocket password"
+help = "In OBS: Tools › WebSocket Server Settings › Show Connect Info, then copy the Server Password."
+item = "obs.{label}"
+placeholder = "Server Password"
+needed = 0
 
 [settings]
 type = "object"
 
-[settings.properties.greeting]
+[settings.properties.thread]
+type = "integer"
+title = "Alerts thread"
+description = "The board thread a freeze's alert and its all-clear are posted in. None: nothing is posted, and health says so."
+minimum = 0
+default = 0
+
+[settings.properties.mention]
 type = "string"
-default = "Hello"
+title = "Who to tell"
+description = "The handle an alert @mentions, so they're notified at once (@james)."
+default = ""
+
+[settings.properties.every_seconds]
+type = "integer"
+title = "Look every (seconds)"
+description = "How often the watchdog compares OBS's picture with the screen while recording."
+minimum = 1
+maximum = 120
+default = 15
+
+[settings.properties.frozen_seconds]
+type = "integer"
+title = "Frozen after (seconds)"
+description = "How long a capture's picture may stay the same while the screen moves before it's a freeze."
+minimum = 2
+maximum = 600
+default = 60
+
+[settings.properties.source]
+type = "string"
+title = "Source to watch"
+description = "One source by name, held against the main display unless it's a capture. Empty: every screen capture showing in the program scene."
+default = ""
+
+[settings.properties.host]
+type = "string"
+title = "WebSocket host"
+default = "127.0.0.1"
+
+[settings.properties.port]
+type = "integer"
+title = "WebSocket port"
+minimum = 1
+maximum = 65535
+default = 4455
+
+[[commands]]
+kind = "obs.status"
+title = "OBS: recording and watchdog status"
+params = { type = "object", properties = {}, additionalProperties = false }
+lane = "obs"
+slash = "status"
+summary = "Whether OBS is open and recording, what the watchdog watches, and where its alerts go"
+
+[[commands]]
+kind = "obs.add"
+title = "Add OBS's WebSocket password"
+params = { type = "object", properties = { name = { type = "string", description = "What to call it (studio): lowercase letters, digits, . _ -" } } }
+slash = "add"
+form = "websocket"
+summary = "Add OBS's WebSocket password for this machine"
+
+[[events]]
+name = "obs.status"
+description = "OBS open or not, its WebSocket connected, recording or not, the program scene, and the sources watched and frozen."
