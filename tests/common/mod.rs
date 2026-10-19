@@ -16,6 +16,7 @@ use base64::Engine;
 use pointman_extension::testing::StandIn;
 use serde_json::{json, Value};
 use tempfile::TempDir;
+use tungstenite::handshake::server::{Callback, ErrorResponse, Request, Response};
 use tungstenite::protocol::frame::coding::CloseCode;
 use tungstenite::protocol::CloseFrame;
 use tungstenite::Message;
@@ -125,15 +126,20 @@ fn send(ws: &mut tungstenite::WebSocket<TcpStream>, op: u64, d: Value) -> bool {
     ws.send(Message::text(json!({"op": op, "d": d}).to_string())).is_ok()
 }
 
-fn serve(stream: TcpStream, state: Arc<Mutex<ObsState>>) {
-    // obs-websocket answers with the subprotocol the client asks for (obswebsocket.json)
-    let agree = |req: &tungstenite::handshake::server::Request, mut res: tungstenite::handshake::server::Response| {
+/// obs-websocket answers with the subprotocol the client asks for (obswebsocket.json).
+struct Agree;
+
+impl Callback for Agree {
+    fn on_request(self, req: &Request, mut res: Response) -> Result<Response, ErrorResponse> {
         if let Some(p) = req.headers().get("Sec-WebSocket-Protocol") {
             res.headers_mut().insert("Sec-WebSocket-Protocol", p.clone());
         }
         Ok(res)
-    };
-    let Ok(mut ws) = tungstenite::accept_hdr(stream, agree) else { return };
+    }
+}
+
+fn serve(stream: TcpStream, state: Arc<Mutex<ObsState>>) {
+    let Ok(mut ws) = tungstenite::accept_hdr(stream, Agree) else { return };
     let password = state.lock().unwrap().password.clone();
     let mut hello = json!({"obsWebSocketVersion": "5.6.2", "rpcVersion": 1});
     if password.is_some() {
