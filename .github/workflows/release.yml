@@ -7,9 +7,9 @@
 # archive attached. gh keeps it a draft until they're all up, so core's `released` delivery finds
 # each platform in `platforms`; one missing is refused.
 #
-# Linux builds are musl, so static: they run on any distribution, NixOS included, whose loader
-# isn't where a glibc build looks for it. Both Macs build on macos-14, the Intel one cross-compiled
-# (GitHub retired its macos-13 runners), so that's the one build whose tests don't run.
+# obs reads the real screen with macOS's own tools, so its platforms are the two Macs: both build on
+# macos-14, the Intel one cross-compiled (GitHub retired its macos-13 runners), so that's the one
+# build whose tests don't run.
 name: release
 on:
   push:
@@ -29,8 +29,6 @@ jobs:
         include:
           - { platform: macos-arm64, runner: macos-14, target: aarch64-apple-darwin, test: true }
           - { platform: macos-x86_64, runner: macos-14, target: x86_64-apple-darwin, test: false }
-          - { platform: linux-x86_64, runner: ubuntu-24.04, target: x86_64-unknown-linux-musl, test: true }
-          - { platform: linux-arm64, runner: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, test: true }
     runs-on: ${{ matrix.runner }}
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
@@ -39,8 +37,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Its id and version, and the tag's
         run: |
           id=$(sed -n 's/^id = "\(.*\)"/\1/p' extension.toml | head -1)
