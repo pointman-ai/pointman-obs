@@ -55,6 +55,10 @@ pub struct ObsState {
     pub items: Vec<Value>,
     pub inputs: HashMap<String, (String, Value)>,
     pub pictures: HashMap<String, Vec<u8>>,
+    /// screenshots to refuse, once each: (source, width asked for)
+    pub fail: Vec<(String, u64)>,
+    /// whether the recording file grows at each GetRecordStatus
+    pub grow: bool,
     /// every request's type, in order
     pub asked: Vec<String>,
 }
@@ -79,7 +83,12 @@ impl ObsState {
                 ("Display Capture".to_string(), ("screen_capture".to_string(), json!({"display_uuid": "MAIN-UUID"}))),
                 ("Mic".to_string(), ("coreaudio_input_capture".to_string(), json!({}))),
             ]),
-            pictures: HashMap::from([("Display Capture".to_string(), picture(640, 400, Some((100, 100, 40))))]),
+            pictures: HashMap::from([
+                ("Display Capture".to_string(), picture(640, 400, Some((100, 100, 40)))),
+                ("Main".to_string(), picture(640, 400, Some((200, 200, 40)))),
+            ]),
+            fail: Vec::new(),
+            grow: true,
             asked: Vec::new(),
         }
     }
@@ -192,7 +201,7 @@ fn answer(st: &mut ObsState, kind: &str, data: &Value) -> (bool, Value) {
     match kind {
         "GetVersion" => (true, json!({"obsVersion": "32.2.2", "obsWebSocketVersion": "5.6.2"})),
         "GetRecordStatus" => {
-            if st.recording && !st.paused {
+            if st.recording && !st.paused && st.grow {
                 st.bytes += 400_000;
             }
             (
@@ -213,7 +222,14 @@ fn answer(st: &mut ObsState, kind: &str, data: &Value) -> (bool, Value) {
         }
         "GetSourceScreenshot" => {
             let name = data["sourceName"].as_str().unwrap_or_default();
-            match st.pictures.get(name) {
+            let width = data["imageWidth"].as_u64().unwrap_or(0);
+            if let Some(i) = st.fail.iter().position(|(n, w)| n == name && *w == width) {
+                st.fail.remove(i);
+                return (false, json!("Failed to render screenshot"));
+            }
+            // the looks' 640 px picture is the test's; any other width (a post's) is a plain one that wide
+            let sized = (width != 640).then(|| picture(width as u32, width as u32 * 5 / 8, None));
+            match sized.as_ref().or(st.pictures.get(name)) {
                 Some(png) => {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(png);
                     (true, json!({"imageData": format!("data:image/png;base64,{b64}")}))
@@ -329,7 +345,9 @@ pub fn obs(port: u16, screen: &FakeScreen, posts: &Posts, extra: Value) -> Stand
             let body = p["body"].clone();
             let file = body["files"][0]["file"].as_str().unwrap_or_default().to_string();
             let mut b = body.clone();
-            b["png"] = json!(std::fs::read(&file).map(|f| f.starts_with(b"\x89PNG")).unwrap_or(false));
+            let png = std::fs::read(&file).unwrap_or_default();
+            b["png"] = json!(png.starts_with(b"\x89PNG"));
+            b["png_width"] = json!(png.get(16..20).map(|w| u32::from_be_bytes(w.try_into().unwrap())));
             let mut kept = kept.lock().unwrap();
             kept.push(b);
             Ok(json!({"asset_id": 5, "version_id": kept.len(), "number": kept.len(), "message_id": 900 + kept.len()}))

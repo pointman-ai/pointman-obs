@@ -120,6 +120,7 @@ struct Status {
     frozen: Vec<(String, Mark)>,
     stalled: Option<Mark>,
     thread: Option<i64>,
+    mention: String,
     port: u16,
     posted: Option<String>,
 }
@@ -259,6 +260,7 @@ impl Dog {
         st.running = running || looked.is_ok();
         st.problem = looked.err();
         st.thread = s.thread;
+        st.mention = s.mention.clone();
         st.port = s.port;
         st.frozen = self.seen.iter().filter_map(|(n, w)| Some((n.clone(), w.watch.alerted.clone()?))).collect();
         st.stalled = self.growth.alerted.clone();
@@ -340,11 +342,15 @@ impl Dog {
         match self.growth.look(&at, bytes, s.frozen) {
             Some(Stall::Stalled { since, bytes }) => {
                 let text = words::stalled(&s.mention, &self.machine, &since, bytes);
-                if let Some(image) = self.picture_for_post(&scene, &since, "recording") {
-                    let open = Open { asset: self.asset("recording", &since), since, image };
-                    self.post(s, &open, text, Some("Recording stalled"));
-                    self.open.insert(STALL.into(), open);
-                    self.save_open();
+                match self.picture_for_post(&scene, "recording", None) {
+                    Some(image) => {
+                        let open = Open { asset: self.asset("recording", &since), since, image };
+                        self.post(s, &open, text, Some("Recording stalled"));
+                        self.open.insert(STALL.into(), open);
+                        self.save_open();
+                    }
+                    // nothing to post it with: the next look alerts again
+                    None => self.growth.alerted = None,
                 }
             }
             Some(Stall::Growing { since, at }) => {
@@ -397,10 +403,8 @@ impl Dog {
             }
         }
         let obs = self.obs.as_mut().expect("connected");
-        let picture = match obs.screenshot(&source.name, LOOK_WIDTH) {
-            Ok(png) => {
-                Grid::from_png(&png).map_err(|e| ObsError::Other(format!("{}'s picture: {e:#}", source.name)))?
-            }
+        let png = match obs.screenshot(&source.name, LOOK_WIDTH) {
+            Ok(png) => png,
             Err(ObsError::Other(why)) if why.starts_with("OBS refused") => {
                 let seen = self.seen.get_mut(&source.name).expect("seen");
                 seen.note = Some(format!("OBS gave no picture of it: {why}"));
@@ -409,6 +413,7 @@ impl Dog {
             }
             Err(e) => return Err(e),
         };
+        let picture = Grid::from_png(&png).map_err(|e| ObsError::Other(format!("{}'s picture: {e:#}", source.name)))?;
         let seen = self.seen.get_mut(&source.name).expect("seen");
         seen.note = note;
         let picture_moved = seen.picture.as_ref().map(|p| picture.changed(p, PICTURE_THRESHOLD, &[]).cells > 0);
@@ -425,16 +430,20 @@ impl Dog {
             Some(Verdict::Frozen { since }) => {
                 let text =
                     words::frozen(&s.mention, &self.machine, &source.name, &seen.shows, &since, self.growth.rate());
-                if let Some(image) = self.picture_for_post(&source.name, &since, &source.name) {
-                    let open = Open { asset: self.asset(&source.name, &since), since, image };
-                    self.post(s, &open, text, Some(&format!("{} frozen", source.name)));
-                    self.open.insert(source.name.clone(), open);
-                    self.save_open();
+                match self.picture_for_post(&source.name, &source.name, Some(&png)) {
+                    Some(image) => {
+                        let open = Open { asset: self.asset(&source.name, &since), since, image };
+                        self.post(s, &open, text, Some(&format!("{} frozen", source.name)));
+                        self.open.insert(source.name.clone(), open);
+                        self.save_open();
+                    }
+                    // nothing to post it with: the next look alerts again
+                    None => self.seen.get_mut(&source.name).expect("seen").watch.alerted = None,
                 }
             }
             Some(Verdict::Moving { since, at }) => {
                 let open = self.open.remove(&source.name);
-                let image = self.picture_for_post(&source.name, &at, &source.name);
+                let image = self.picture_for_post(&source.name, &source.name, Some(&png));
                 if let Some(mut open) = open {
                     open.image = image.unwrap_or(open.image);
                     self.post(s, &open, words::moving(&source.name, &since, &at), None);
@@ -452,20 +461,36 @@ impl Dog {
     }
 
     /// OBS's picture of a source (or a scene) for a post, kept in the state folder until it's gone out.
-    fn picture_for_post(&mut self, source: &str, at: &Mark, what: &str) -> Option<PathBuf> {
+    /// If OBS doesn't give one, `fallback` (the look's own, smaller); with neither, None.
+    fn picture_for_post(&mut self, source: &str, what: &str, fallback: Option<&[u8]>) -> Option<PathBuf> {
         let dir = self.state.join("posts");
         std::fs::create_dir_all(&dir).ok()?;
         prune(&dir, POSTS_KEPT);
         let path = dir.join(format!("{}-{}.png", words::slug(what), words::stamp(now()).replace('-', "")));
-        let png = self.obs.as_mut()?.screenshot(source, POST_WIDTH);
-        match png.map(|png| std::fs::write(&path, png)) {
-            Ok(Ok(())) => Some(path),
-            Ok(Err(e)) => {
-                self.h.log(format!("couldn't keep {source}'s picture at {}: {e}", words::clock(at.at)));
-                None
+        let png = match self.obs.as_mut().map(|obs| obs.screenshot(source, POST_WIDTH)) {
+            Some(Ok(png)) => png,
+            got => {
+                let why = match got {
+                    Some(Err(e)) => e.to_string(),
+                    _ => "not connected".into(),
+                };
+                match fallback {
+                    Some(look) => {
+                        self.h.log(format!("no {POST_WIDTH} px picture of {source} ({why}): posting the look's"));
+                        look.to_vec()
+                    }
+                    None => {
+                        self.h
+                            .log(format!("no picture of {source} for the post ({why}): trying again at the next look"));
+                        return None;
+                    }
+                }
             }
+        };
+        match std::fs::write(&path, png) {
+            Ok(()) => Some(path),
             Err(e) => {
-                self.h.log(format!("no picture of {source} for the post: {e}"));
+                self.h.log(format!("couldn't keep {source}'s picture for the post: {e}"));
                 None
             }
         }
@@ -599,6 +624,12 @@ fn health(st: &Status) -> Value {
         ("failing", format!("the recording hasn't grown since {}", words::clock(since.at)))
     } else if st.thread.is_none() {
         ("failing", "no thread to post alerts in: set `thread` in ~/.config/pointman/extensions/obs/config.toml".into())
+    } else if st.mention.is_empty() {
+        (
+            "failing",
+            "alerts mention nobody, so nobody is told: set `mention` in ~/.config/pointman/extensions/obs/config.toml"
+                .into(),
+        )
     } else if let Some(posted) = &st.posted {
         ("failing", posted.clone())
     } else if st.problem.is_some() || !st.looked {
@@ -648,7 +679,10 @@ fn status_text(st: &Status, machine: &str, mention: &str) -> String {
         }
     }
     lines.push(match st.thread {
-        Some(t) if mention.is_empty() => format!("Alerts go to thread {t}."),
+        Some(t) if mention.is_empty() => format!(
+            "Alerts go to thread {t}, mentioning nobody, so nobody is told: set `mention` in \
+             ~/.config/pointman/extensions/obs/config.toml."
+        ),
         Some(t) => format!("Alerts go to thread {t}, mentioning {mention}."),
         None => "No thread is set for alerts: set `thread` in ~/.config/pointman/extensions/obs/config.toml.".into(),
     });

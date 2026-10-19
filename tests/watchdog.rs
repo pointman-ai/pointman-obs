@@ -51,6 +51,55 @@ fn a_frozen_capture_alerts_once_with_its_frame_then_all_clears_when_it_moves() {
 }
 
 #[test]
+fn a_freeze_whose_post_picture_fails_posts_the_looks_picture() {
+    let mut state = ObsState::recording();
+    state.fail = vec![("Display Capture".into(), 1280)];
+    let (fake, screen, posts) = (FakeObs::start(state), FakeScreen::new(), Posts::default());
+    let node = obs(fake.port, &screen, &posts, json!({})).start().unwrap();
+    let moving = Moving::start(&screen);
+    let got = wait_posts(&posts, WITHIN, |p| !p.is_empty());
+    drop(moving);
+    assert_eq!(got.len(), 1, "the alert still goes: {}", node.log());
+    assert!(text(&got[0]).starts_with("@james OBS's **Display Capture** has frozen"));
+    assert_eq!(
+        (got[0]["png"].clone(), got[0]["png_width"].clone()),
+        (json!(true), json!(640)),
+        "the look's own picture"
+    );
+    assert!(fake.state.lock().unwrap().fail.is_empty(), "the 1280 px one was asked for, and refused");
+}
+
+#[test]
+fn a_stall_whose_picture_fails_alerts_at_the_next_look() {
+    let mut state = ObsState::recording();
+    state.fail = vec![("Main".into(), 1280)];
+    let (fake, screen, posts) = (FakeObs::start(state), FakeScreen::new(), Posts::default());
+    let node = obs(fake.port, &screen, &posts, json!({})).start().unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    fake.set(|s| s.grow = false); // the file stops growing; the screen and the capture are still
+    let got = wait_posts(&posts, WITHIN, |p| !p.is_empty());
+    assert_eq!(got.len(), 1, "{}", node.log());
+    assert!(
+        text(&got[0]).starts_with("@james OBS's recording on test-machine hasn't grown since"),
+        "{}",
+        text(&got[0])
+    );
+    assert!(node.log().contains("trying again at the next look"), "the first try had no picture: {}", node.log());
+    assert_eq!(got[0]["png_width"], 1280);
+}
+
+#[test]
+fn no_mention_means_nobody_is_told_and_health_says_so() {
+    let (fake, screen, posts) = (FakeObs::start(ObsState::recording()), FakeScreen::new(), Posts::default());
+    let node = obs(fake.port, &screen, &posts, json!({"mention": ""})).start().unwrap();
+    let said = node.run("obs.status", json!({})).unwrap().result["text"].as_str().unwrap().to_string();
+    assert!(said.contains("Alerts go to thread 77, mentioning nobody, so nobody is told"), "{said}");
+    let health = node.call("health.check", json!({})).unwrap();
+    assert_eq!(part(&health, "watchdog")["state"], "failing");
+    assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("alerts mention nobody"), "{health}");
+}
+
+#[test]
 fn a_still_screen_is_no_alarm() {
     let (fake, screen, posts) = (FakeObs::start(ObsState::recording()), FakeScreen::new(), Posts::default());
     let node = obs(fake.port, &screen, &posts, json!({})).start().unwrap();

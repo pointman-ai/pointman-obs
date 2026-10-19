@@ -50,6 +50,9 @@ In the `thread` the settings name, as a `files.publish` of OBS's picture with a 
 | The frozen source leaves the program scene | That it's no longer watched, and what part of the recording is frozen |
 | The file stops growing, and grows again | An alert with `mention`, then `✅` |
 
+The picture is OBS's at 1280 px across; if OBS doesn't give one just then, the look's own (640 px) goes
+with the alert. A stall's picture is the program scene's, and with none, it's tried again at the next look.
+
 Once per freeze: an alert that's out is kept in the state folder (`alerts.json`), so a restart doesn't
 send it again, and the next move is its all-clear.
 
@@ -89,8 +92,8 @@ one look.
 
 Health has two parts. `obs`: OBS isn't open (stopped), open with its WebSocket server off, asking for a
 password (needs auth: `/obs add`), refusing the vault's (needs auth), or ok with the recording's state.
-`watchdog`: failing while a capture is frozen or the file has stalled, or with no `thread` set; else what
-it watches. The `obs.status` event says the same when it changes.
+`watchdog`: failing while a capture is frozen or the file has stalled, with no `thread` set, or with no
+`mention` (an alert nobody is told about); else what it watches. The `obs.status` event says the same when it changes.
 
 ## Development
 
