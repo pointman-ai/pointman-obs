@@ -1,6 +1,6 @@
 [package]
 name = "obs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "OBS for Pointman: a recording watchdog that tells you within a minute if the screen capture freezes."
 license = "MIT"
