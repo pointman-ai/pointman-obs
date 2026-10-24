@@ -6,10 +6,10 @@
 [extension]
 id = "obs"
 name = "OBS"
-version = "0.1.0"
+version = "0.2.0"
 publisher = "aurelio"
 summary = "A recording watchdog for OBS: if the screen capture freezes while you record, it tells you in a thread within a minute."
-node = ">=0.1,<1"
+node = ">=0.2.0"
 platforms = ["macos-arm64", "macos-x86_64"]
 
 [run]

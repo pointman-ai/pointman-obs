@@ -9,7 +9,8 @@ frame at 60 fps for the next 1 h 20 min, with no warning: 31 of its 36 minutes o
 lost (Pointman thread 10399). A frozen capture still writes a normal-looking file, only a small one.
 
 One Rust binary, `bin/obs`, on the [pointman-extension](https://github.com/pointman-ai/pointman-extension)
-crate, for macOS (Apple silicon and Intel).
+crate (the node's typed protocol: each method's params and result are its messages), for macOS (Apple silicon
+and Intel).
 
 ## How it tells
 
