@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
+use pointman_extension::convert::whole_numbers;
 use pointman_extension::testing::StandIn;
 use serde_json::{json, Value};
 use tempfile::TempDir;
@@ -342,7 +343,7 @@ pub fn obs(port: u16, screen: &FakeScreen, posts: &Posts, extra: Value) -> Stand
         .env("POINTMAN_OBS_TEST_SCREEN", screen.path("screen.png"))
         .env("POINTMAN_OBS_TEST_CALLS", screen.path("calls"))
         .method("files.publish", move |p: Value| {
-            let body = p["body"].clone();
+            let body = whole_numbers(p["body"].clone());
             let file = body["files"][0]["file"].as_str().unwrap_or_default().to_string();
             let mut b = body.clone();
             let png = std::fs::read(&file).unwrap_or_default();
@@ -350,7 +351,8 @@ pub fn obs(port: u16, screen: &FakeScreen, posts: &Posts, extra: Value) -> Stand
             b["png_width"] = json!(png.get(16..20).map(|w| u32::from_be_bytes(w.try_into().unwrap())));
             let mut kept = kept.lock().unwrap();
             kept.push(b);
-            Ok(json!({"asset_id": 5, "version_id": kept.len(), "number": kept.len(), "message_id": 900 + kept.len()}))
+            let n = kept.len();
+            Ok(json!({"file": {"value": "5"}, "version": {"value": n.to_string()}, "post": {"value": (900 + n).to_string()}}))
         })
 }
 
@@ -371,7 +373,12 @@ pub fn text(post: &Value) -> String {
 }
 
 pub fn part<'a>(parts: &'a Value, id: &str) -> &'a Value {
-    parts.as_array().unwrap().iter().find(|p| p["id"] == id).unwrap_or_else(|| panic!("no part {id} in {parts}"))
+    parts["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == id)
+        .unwrap_or_else(|| panic!("no part {id} in {parts}"))
 }
 
 pub fn exists(p: &Path) -> bool {

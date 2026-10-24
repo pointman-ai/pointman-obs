@@ -19,6 +19,12 @@ use obs::screen::{self, Real, Screen};
 use obs::sources::{self, Shows, Source};
 use obs::watch::{Growth, Look, Mark, Stall, Verdict, Watch};
 use obs::words;
+use pointman_extension::convert::to_struct;
+use pointman_extension::protocol::{
+    FilesPublishRequest, HealthCheckRequest, HealthCheckResponse, HealthFixRequest, HealthFixResponse,
+};
+use pointman_extension::v1::health::part::State;
+use pointman_extension::v1::health::{Action, Part};
 use pointman_extension::{Extension, Handle, Job};
 use serde_json::{json, Value};
 
@@ -174,9 +180,8 @@ impl Dog {
         if !self.machine.is_empty() {
             return;
         }
-        let node = self.h.node();
-        self.state = node["state_dir"].as_str().map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-        self.machine = node["machine"].as_str().filter(|m| !m.is_empty()).unwrap_or("this machine").to_string();
+        self.state = Some(self.h.state_dir()).filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(std::env::temp_dir);
+        self.machine = self.h.machine();
         self.open = std::fs::read_to_string(self.state.join("alerts.json"))
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -207,10 +212,7 @@ impl Dog {
 
     fn with_vault(&mut self, s: &Settings) -> Result<Obs, ObsError> {
         self.password = None;
-        let listed =
-            self.h.request("secret.list", json!({"prefix": "obs."})).map_err(|e| ObsError::Other(format!("{e:#}")))?;
-        let names: Vec<String> =
-            listed["names"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect();
+        let names = self.h.secrets("obs.").map_err(|e| ObsError::Other(format!("{e:#}")))?;
         if names.is_empty() {
             return Err(ObsError::NeedsPassword);
         }
@@ -559,12 +561,11 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
                 if attempt > 0 {
                     std::thread::sleep(Duration::from_secs(10));
                 }
-                match h.request_timeout("files.publish", json!({"body": body}), Duration::from_secs(120)) {
+                let publish = FilesPublishRequest { body: to_struct(&body).into(), ..Default::default() };
+                match h.request_timeout(&publish, Duration::from_secs(120)) {
                     Ok(answer) => {
-                        h.log(format!(
-                            "posted {} in thread {}: message {}",
-                            post.asset, post.thread, answer["message_id"]
-                        ));
+                        let message = answer.post.as_option().map(|p| p.value.as_str()).unwrap_or("?");
+                        h.log(format!("posted {} in thread {}: message {message}", post.asset, post.thread));
                         last = None;
                         break;
                     }
@@ -581,13 +582,13 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
 }
 
 /// The two parts health shows: OBS itself, and the watchdog.
-fn health(st: &Status) -> Value {
+fn health(st: &Status) -> Vec<Part> {
     let rec = st.recording.as_ref().filter(|r| r["outputActive"] == true);
-    let (state, needs, why): (&str, Vec<&str>, Option<String>) = match (&st.problem, st.looked) {
-        (_, false) => ("unknown", vec![], Some("not looked at yet".into())),
-        (Some(ObsError::Unreachable(_)), _) if !st.running => ("stopped", vec![], Some("OBS isn't open".into())),
+    let (state, needs, why): (State, Vec<Action>, Option<String>) = match (&st.problem, st.looked) {
+        (_, false) => (State::Unspecified, vec![], Some("not looked at yet".into())),
+        (Some(ObsError::Unreachable(_)), _) if !st.running => (State::Stopped, vec![], Some("OBS isn't open".into())),
         (Some(ObsError::Unreachable(_)), _) => (
-            "failing",
+            State::Failing,
             vec![],
             Some(format!(
                 "OBS is open, but nothing answers on its WebSocket port ({}): turn its server on in OBS › Tools › \
@@ -596,24 +597,28 @@ fn health(st: &Status) -> Value {
             )),
         ),
         (Some(e @ (ObsError::NeedsPassword | ObsError::WrongPassword)), _) => {
-            ("failing", vec!["auth"], Some(e.to_string()))
+            (State::Failing, vec![Action::Auth], Some(e.to_string()))
         }
-        (Some(e), _) => ("failing", vec![], Some(e.to_string())),
+        (Some(e), _) => (State::Failing, vec![], Some(e.to_string())),
         (None, true) => match rec {
             Some(r) => (
-                "ok",
+                State::Ok,
                 vec![],
                 Some(format!("recording, {} in", words::timecode(r["outputTimecode"].as_str().unwrap_or("")))),
             ),
-            None => ("ok", vec![], Some("not recording".into())),
+            None => (State::Ok, vec![], Some("not recording".into())),
         },
     };
-    let obs = json!({"id": "obs", "kind": "app", "name": "OBS Studio", "version": st.version,
-                     "state": state, "needs": needs, "why": why});
+    let obs = Part {
+        version: st.version.clone(),
+        needs: needs.into_iter().map(Into::into).collect(),
+        why,
+        ..part("obs", "app", "OBS Studio", state)
+    };
     let watched = st.watching.iter().map(|w| w.0.as_str()).collect::<Vec<_>>().join(", ");
     let (state, why) = if let Some((name, since)) = st.frozen.first() {
         (
-            "failing",
+            State::Failing,
             format!(
                 "{name} frozen since {} ({} into the recording)",
                 words::clock(since.at),
@@ -621,27 +626,34 @@ fn health(st: &Status) -> Value {
             ),
         )
     } else if let Some(since) = &st.stalled {
-        ("failing", format!("the recording hasn't grown since {}", words::clock(since.at)))
+        (State::Failing, format!("the recording hasn't grown since {}", words::clock(since.at)))
     } else if st.thread.is_none() {
-        ("failing", "no thread to post alerts in: set `thread` in ~/.config/pointman/extensions/obs/config.toml".into())
+        (
+            State::Failing,
+            "no thread to post alerts in: set `thread` in ~/.config/pointman/extensions/obs/config.toml".into(),
+        )
     } else if st.mention.is_empty() {
         (
-            "failing",
+            State::Failing,
             "alerts mention nobody, so nobody is told: set `mention` in ~/.config/pointman/extensions/obs/config.toml"
                 .into(),
         )
     } else if let Some(posted) = &st.posted {
-        ("failing", posted.clone())
+        (State::Failing, posted.clone())
     } else if st.problem.is_some() || !st.looked {
-        ("stopped", "not watching: OBS can't be read".into())
+        (State::Stopped, "not watching: OBS can't be read".into())
     } else if rec.is_none() {
-        ("ok", "not recording: nothing to watch".into())
+        (State::Ok, "not recording: nothing to watch".into())
     } else if watched.is_empty() {
-        ("ok", "recording, but no screen capture is showing in the program scene".into())
+        (State::Ok, "recording, but no screen capture is showing in the program scene".into())
     } else {
-        ("ok", format!("watching {watched}"))
+        (State::Ok, format!("watching {watched}"))
     };
-    json!([obs, {"id": "watchdog", "kind": "watchdog", "name": "Recording watchdog", "state": state, "needs": [], "why": why}])
+    vec![obs, Part { why: Some(why), ..part("watchdog", "watchdog", "Recording watchdog", state) }]
+}
+
+fn part(id: &str, kind: &str, name: &str, state: State) -> Part {
+    Part { id: id.into(), kind: kind.into(), name: Some(name.into()), state: state.into(), ..Default::default() }
 }
 
 /// obs.status's answer, from a fresh read of OBS and the watchdog's last look.
@@ -729,29 +741,22 @@ fn main() -> anyhow::Result<()> {
     });
 
     let st = status.clone();
-    ext.method("health.check", move |_| Ok(health(&lock(&st))));
+    ext.on(move |_: HealthCheckRequest| Ok(HealthCheckResponse { parts: health(&lock(&st)), ..Default::default() }));
     let st = status.clone();
-    ext.method("health.fix", move |params: Value| {
-        let message = match (params["part"].as_str(), params["action"].as_str()) {
-            (Some("obs"), Some("auth")) => "Add OBS's WebSocket password with /obs add in any thread: the app opens a \
-                                            form, so it never goes in a post. It's in OBS › Tools › WebSocket Server \
-                                            Settings › Show Connect Info."
-                .to_string(),
+    ext.on(move |fix: HealthFixRequest| {
+        let message = match fix.part.as_str() {
+            "obs" if fix.action == Action::Auth => {
+                "Add OBS's WebSocket password with /obs add in any thread: the app opens a \
+                 form, so it never goes in a post. It's in OBS › Tools › WebSocket Server \
+                 Settings › Show Connect Info."
+                    .to_string()
+            }
             _ => {
-                let parts = health(&lock(&st));
-                let why = parts
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .find(|p| p["id"] == params["part"])
-                    .map(|p| p["why"].clone());
-                format!(
-                    "Nothing to fix from here{}",
-                    why.and_then(|w| w.as_str().map(|w| format!(": {w}"))).unwrap_or_default()
-                )
+                let why = health(&lock(&st)).into_iter().find(|p| p.id == fix.part).and_then(|p| p.why);
+                format!("Nothing to fix from here{}", why.map(|w| format!(": {w}")).unwrap_or_default())
             }
         };
-        Ok(json!({"message": message}))
+        Ok(HealthFixResponse { message, ..Default::default() })
     });
 
     ext.run()
