@@ -28,7 +28,7 @@ fn a_frozen_capture_alerts_once_with_its_frame_then_all_clears_when_it_moves() {
     assert_eq!(alert["asset"]["kind"], "image");
     assert_eq!(alert["png"], true, "the frozen frame goes with it: {alert}");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "watchdog")["state"], "failing", "{health}");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_FAILING", "{health}");
     assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("Display Capture frozen since"));
 
     // still frozen: nothing more
@@ -47,7 +47,7 @@ fn a_frozen_capture_alerts_once_with_its_frame_then_all_clears_when_it_moves() {
     assert!(!said.contains('@'), "the all-clear doesn't mention anyone again: {said}");
     assert_eq!(got[1]["asset"]["path"], got[0]["asset"]["path"], "the all-clear is the alert card's next version");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "watchdog")["state"], "ok", "{health}");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_OK", "{health}");
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn no_mention_means_nobody_is_told_and_health_says_so() {
     let said = node.run("obs.status", json!({})).unwrap().result["text"].as_str().unwrap().to_string();
     assert!(said.contains("Alerts go to thread 77, mentioning nobody, so nobody is told"), "{said}");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "watchdog")["state"], "failing");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_FAILING");
     assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("alerts mention nobody"), "{health}");
 }
 
@@ -107,7 +107,7 @@ fn a_still_screen_is_no_alarm() {
     assert!(posts.lock().unwrap().is_empty(), "{:?}", posts.lock().unwrap());
     assert!(screen.calls().lines().count() >= 4, "the screen was looked at: {}", screen.calls());
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "watchdog")["state"], "ok", "{health}");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_OK", "{health}");
     assert_eq!(part(&health, "watchdog")["why"], "watching Display Capture");
 }
 
@@ -194,9 +194,9 @@ fn obs_closed_is_stopped_and_its_websocket_off_is_failing() {
     let health = node.call("health.check", json!({})).unwrap();
     assert_eq!(
         (part(&health, "obs")["state"].clone(), part(&health, "obs")["why"].clone()),
-        (json!("stopped"), json!("OBS isn't open"))
+        (json!("STATE_STOPPED"), json!("OBS isn't open"))
     );
-    assert_eq!(part(&health, "watchdog")["state"], "stopped");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_STOPPED");
 
     // OBS open, with its WebSocket server off
     screen.list(json!({"obs_pid": 4242}));
@@ -204,7 +204,7 @@ fn obs_closed_is_stopped_and_its_websocket_off_is_failing() {
     let said = done.result["text"].as_str().unwrap();
     assert!(said.starts_with("OBS is open on test-machine, but nothing answers on its WebSocket port"), "{said}");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "obs")["state"], "failing");
+    assert_eq!(part(&health, "obs")["state"], "STATE_FAILING");
     assert!(part(&health, "obs")["why"].as_str().unwrap().contains("Tools › WebSocket Server Settings"));
     assert!(posts.lock().unwrap().is_empty());
 }
@@ -220,7 +220,7 @@ fn a_wrong_password_needs_auth_and_the_right_one_connects() {
     node.run("obs.status", json!({})).unwrap();
     let health = node.call("health.check", json!({})).unwrap();
     let p = part(&health, "obs");
-    assert_eq!((p["state"].clone(), p["needs"].clone()), (json!("failing"), json!(["auth"])), "{health}");
+    assert_eq!((p["state"].clone(), p["needs"].clone()), (json!("STATE_FAILING"), json!(["ACTION_AUTH"])), "{health}");
     assert!(p["why"].as_str().unwrap().contains("asks for a password: add it with /obs add"), "{p}");
     node.stop();
 
@@ -229,8 +229,8 @@ fn a_wrong_password_needs_auth_and_the_right_one_connects() {
     let said = node.run("obs.status", json!({})).unwrap().result["text"].as_str().unwrap().to_string();
     assert!(said.contains("OBS refused the WebSocket password"), "{said}");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "obs")["needs"], json!(["auth"]));
-    let fix = node.call("health.fix", json!({"part": "obs", "action": "auth"})).unwrap();
+    assert_eq!(part(&health, "obs")["needs"], json!(["ACTION_AUTH"]));
+    let fix = node.call("health.fix", json!({"part": "obs", "action": "ACTION_AUTH"})).unwrap();
     assert!(fix["message"].as_str().unwrap().contains("/obs add"));
     node.stop();
 
@@ -242,7 +242,7 @@ fn a_wrong_password_needs_auth_and_the_right_one_connects() {
     let said = node.run("obs.status", json!({})).unwrap().result["text"].as_str().unwrap().to_string();
     assert!(said.starts_with("OBS 32.2.2 on test-machine: recording"), "{said}");
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "obs")["state"], "ok", "{health}");
+    assert_eq!(part(&health, "obs")["state"], "STATE_OK", "{health}");
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn no_thread_means_no_post_and_health_says_so() {
     let node = obs(fake.port, &screen, &posts, json!({"thread": 0})).start().unwrap();
     node.run("obs.status", json!({})).unwrap();
     let health = node.call("health.check", json!({})).unwrap();
-    assert_eq!(part(&health, "watchdog")["state"], "failing");
+    assert_eq!(part(&health, "watchdog")["state"], "STATE_FAILING");
     assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("no thread to post alerts in"));
     let moving = Moving::start(&screen);
     std::thread::sleep(Duration::from_secs(6));
