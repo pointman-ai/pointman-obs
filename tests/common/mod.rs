@@ -352,7 +352,7 @@ pub fn obs(port: u16, screen: &FakeScreen, posts: &Posts, extra: Value) -> Stand
             let mut kept = kept.lock().unwrap();
             kept.push(b);
             let n = kept.len();
-            Ok(json!({"file": {"value": "5"}, "version": {"value": n.to_string()}, "post": {"value": (900 + n).to_string()}}))
+            Ok(json!({"file": {"id": "5"}, "version": {"id": n.to_string()}, "post": {"id": (900 + n).to_string()}}))
         })
 }
 
