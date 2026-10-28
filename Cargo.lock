@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "obs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -568,8 +568,8 @@ dependencies = [
 
 [[package]]
 name = "pointman-extension"
-version = "0.2.0"
-source = "git+https://github.com/pointman-ai/pointman-extension?rev=d338e27a5719139d7cafae4f838c1b699395710b#d338e27a5719139d7cafae4f838c1b699395710b"
+version = "0.5.0"
+source = "git+https://github.com/pointman-ai/pointman-extension?tag=v0.5.0#91829c5b75f0336ad6f40ad43427204649a58787"
 dependencies = [
  "anyhow",
  "buffa",

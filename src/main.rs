@@ -564,7 +564,7 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
                 let publish = FilesPublishRequest { body: to_struct(&body).into(), ..Default::default() };
                 match h.request_timeout(&publish, Duration::from_secs(120)) {
                     Ok(answer) => {
-                        let message = answer.post.as_option().map(|p| p.value.as_str()).unwrap_or("?");
+                        let message = answer.post.as_option().map(|p| p.id.as_str()).unwrap_or("?");
                         h.log(format!("posted {} in thread {}: message {message}", post.asset, post.thread));
                         last = None;
                         break;
