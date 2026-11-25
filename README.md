@@ -2,7 +2,7 @@
 
 A Pointman extension for OBS: a recording watchdog. While OBS records, it holds each screen capture's
 picture against the real screen, and when the picture stops while the screen moves, it tells you in a
-thread within about a minute, with the frozen frame. Then an all-clear when its frames move again.
+channel within about a minute, with the frozen frame. Then an all-clear when its frames move again.
 
 Why: while James recorded Spacesheep, OBS's display capture froze at 11:14 and kept writing that one
 frame at 60 fps for the next 1 h 20 min, with no warning: 31 of its 36 minutes of screen footage were
@@ -41,7 +41,7 @@ and Intel).
 
 ## What it posts
 
-In the `thread` the settings name, as a `files.publish` of OBS's picture with a post:
+In the `channel` the settings name, as a `files.publish` of OBS's picture with a post:
 
 | When | Post |
 |---|---|
@@ -63,7 +63,7 @@ agents' hooks do), so the alert notifies by its `@mention`. A node method for it
 ## Setting it up
 
 1. **OBS:** Tools › WebSocket Server Settings › Enable WebSocket server. Keep authentication on.
-2. **The password:** `/obs add` in any thread opens the app's form, which seals it in the vault as
+2. **The password:** `/obs add` in any channel opens the app's form, which seals it in the vault as
    `obs.<label>` (OBS's Show Connect Info has it). The extension tries each `obs.` item until OBS takes one.
    It never reads OBS's config files.
 3. **Screen Recording:** the node needs it (System Settings › Privacy & Security › Screen & System Audio
@@ -74,7 +74,7 @@ agents' hooks do), so the alert notifies by its `@mention`. A node method for it
 
 | Setting | Default | |
 |---|---|---|
-| `thread` | none | The thread alerts go to. Without one nothing is posted, and health says so |
+| `channel` | none | The channel alerts go to. Without one nothing is posted, and health says so |
 | `mention` | none | Who an alert @mentions (`@james`) |
 | `every_seconds` | 15 | How often it looks while recording |
 | `frozen_seconds` | 60 | How long a picture may stay the same while the screen moves |
@@ -93,7 +93,7 @@ one look.
 
 Health has two parts. `obs`: OBS isn't open (stopped), open with its WebSocket server off, asking for a
 password (needs auth: `/obs add`), refusing the vault's (needs auth), or ok with the recording's state.
-`watchdog`: failing while a capture is frozen or the file has stalled, with no `thread` set, or with no
+`watchdog`: failing while a capture is frozen or the file has stalled, with no `channel` set, or with no
 `mention` (an alert nobody is told about); else what it watches. The `obs.status` event says the same when it changes.
 
 ## Development

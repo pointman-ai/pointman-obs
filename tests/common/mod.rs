@@ -23,7 +23,7 @@ use tungstenite::protocol::CloseFrame;
 use tungstenite::Message;
 
 pub const ROOT: &str = env!("CARGO_MANIFEST_DIR");
-pub const THREAD: i64 = 77;
+pub const CHANNEL: i64 = 77;
 
 /// A grey picture with a white square at (x, y), `side` pixels across, as PNG bytes.
 pub fn picture(width: u32, height: u32, square: Option<(u32, u32, u32)>) -> Vec<u8> {
@@ -330,7 +330,7 @@ pub type Posts = Arc<Mutex<Vec<Value>>>;
 /// obs under the stand-in node, against `port`, looking every second and frozen after 3.
 pub fn obs(port: u16, screen: &FakeScreen, posts: &Posts, extra: Value) -> StandIn {
     let mut settings =
-        json!({"port": port, "thread": THREAD, "mention": "@james", "every_seconds": 1, "frozen_seconds": 3});
+        json!({"port": port, "channel": CHANNEL, "mention": "@james", "every_seconds": 1, "frozen_seconds": 3});
     for (k, v) in extra.as_object().unwrap() {
         settings[k] = v.clone();
     }
