@@ -21,7 +21,7 @@ fn a_frozen_capture_alerts_once_with_its_frame_then_all_clears_when_it_moves() {
     let got = wait_posts(&posts, WITHIN, |p| !p.is_empty());
     assert_eq!(got.len(), 1, "one alert: {got:?}\n{}", node.log());
     let alert = &got[0];
-    assert_eq!(alert["post"]["thread_id"], THREAD);
+    assert_eq!(alert["post"]["channel_id"], CHANNEL);
     let said = text(alert);
     assert!(said.starts_with("@james OBS's **Display Capture** has frozen on test-machine."), "{said}");
     assert!(said.contains("into the recording") && said.contains("hide and show **Display Capture**"), "{said}");
@@ -93,7 +93,7 @@ fn no_mention_means_nobody_is_told_and_health_says_so() {
     let (fake, screen, posts) = (FakeObs::start(ObsState::recording()), FakeScreen::new(), Posts::default());
     let node = obs(fake.port, &screen, &posts, json!({"mention": ""})).start().unwrap();
     let said = node.run("obs.status", json!({})).unwrap().result["text"].as_str().unwrap().to_string();
-    assert!(said.contains("Alerts go to thread 77, mentioning nobody, so nobody is told"), "{said}");
+    assert!(said.contains("Alerts go to channel 77, mentioning nobody, so nobody is told"), "{said}");
     let health = node.call("health.check", json!({})).unwrap();
     assert_eq!(part(&health, "watchdog")["state"], "STATE_FAILING");
     assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("alerts mention nobody"), "{health}");
@@ -255,7 +255,7 @@ fn a_live_status_read_says_what_it_watches_and_where_alerts_go() {
     assert!(said.starts_with("OBS 32.2.2 on test-machine: recording, 00:00:"), "{said}");
     assert!(said.contains("in scene “Main”"), "{said}");
     assert!(said.contains("Watching **Display Capture** (display 1 (the main one))"), "{said}");
-    assert!(said.ends_with("Alerts go to thread 77, mentioning @james."), "{said}");
+    assert!(said.ends_with("Alerts go to channel 77, mentioning @james."), "{said}");
     assert_eq!(r["watching"][0]["source"], "Display Capture");
     assert_eq!(r["recording"]["outputActive"], true);
 
@@ -295,18 +295,18 @@ fn nested_scenes_and_hidden_items_and_a_named_source() {
 }
 
 #[test]
-fn no_thread_means_no_post_and_health_says_so() {
+fn no_channel_means_no_post_and_health_says_so() {
     let (fake, screen, posts) = (FakeObs::start(ObsState::recording()), FakeScreen::new(), Posts::default());
-    let node = obs(fake.port, &screen, &posts, json!({"thread": 0})).start().unwrap();
+    let node = obs(fake.port, &screen, &posts, json!({"channel": 0})).start().unwrap();
     node.run("obs.status", json!({})).unwrap();
     let health = node.call("health.check", json!({})).unwrap();
     assert_eq!(part(&health, "watchdog")["state"], "STATE_FAILING");
-    assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("no thread to post alerts in"));
+    assert!(part(&health, "watchdog")["why"].as_str().unwrap().starts_with("no channel to post alerts in"));
     let moving = Moving::start(&screen);
     std::thread::sleep(Duration::from_secs(6));
     drop(moving);
     assert!(posts.lock().unwrap().is_empty());
-    assert!(node.log().contains("no thread set for alerts"), "{}", node.log());
+    assert!(node.log().contains("no channel set for alerts"), "{}", node.log());
 }
 
 #[test]

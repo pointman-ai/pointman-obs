@@ -4,7 +4,7 @@
 //! Every half second on the `obs` lane it checks whether a look is due (`every_seconds`). A look, while
 //! OBS records: the real screen first, then each watched source's picture from OBS, compared with the
 //! last look's (watch.rs judges). An alert, its all-clear and the rest go out as a `files.publish` of the
-//! source's picture with a post in the settings' thread, from a thread of their own so a slow upload
+//! source's picture with a post in the settings' channel, from a thread of their own so a slow upload
 //! never holds up a look. Open alerts are kept in the state folder, so a restart doesn't alert twice.
 
 use std::collections::HashMap;
@@ -61,7 +61,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 struct Settings {
     host: String,
     port: u16,
-    thread: Option<i64>,
+    channel: Option<i64>,
     mention: String,
     every: f64,
     frozen: f64,
@@ -74,7 +74,7 @@ fn settings(h: &Handle) -> Settings {
     Settings {
         host: text("host", "127.0.0.1"),
         port: s["port"].as_u64().unwrap_or(4455) as u16,
-        thread: s["thread"].as_i64().filter(|t| *t > 0),
+        channel: s["channel"].as_i64().filter(|t| *t > 0),
         mention: text("mention", ""),
         every: s["every_seconds"].as_f64().unwrap_or(15.0).max(1.0),
         frozen: s["frozen_seconds"].as_f64().unwrap_or(60.0).max(2.0),
@@ -125,15 +125,15 @@ struct Status {
     watching: Vec<(String, String, String)>,
     frozen: Vec<(String, Mark)>,
     stalled: Option<Mark>,
-    thread: Option<i64>,
+    channel: Option<i64>,
     mention: String,
     port: u16,
     posted: Option<String>,
 }
 
-/// A post to make: a picture on a card, and the text in the thread.
+/// A post to make: a picture on a card, and the text in the channel.
 struct Post {
-    thread: i64,
+    channel: i64,
     asset: String,
     title: String,
     text: String,
@@ -261,7 +261,7 @@ impl Dog {
         st.looked = true;
         st.running = running || looked.is_ok();
         st.problem = looked.err();
-        st.thread = s.thread;
+        st.channel = s.channel;
         st.mention = s.mention.clone();
         st.port = s.port;
         st.frozen = self.seen.iter().filter_map(|(n, w)| Some((n.clone(), w.watch.alerted.clone()?))).collect();
@@ -499,13 +499,13 @@ impl Dog {
     }
 
     fn post(&self, s: &Settings, open: &Open, text: String, title: Option<&str>) {
-        let Some(thread) = s.thread else {
-            self.h.log(format!("no thread set for alerts, so this isn't posted: {text}"));
+        let Some(channel) = s.channel else {
+            self.h.log(format!("no channel set for alerts, so this isn't posted: {text}"));
             return;
         };
         let title =
             title.map(String::from).unwrap_or_else(|| open.asset.rsplit('/').nth(1).unwrap_or("OBS").to_string());
-        let _ = self.posts.send(Post { thread, asset: open.asset.clone(), title, text, image: open.image.clone() });
+        let _ = self.posts.send(Post { channel, asset: open.asset.clone(), title, text, image: open.image.clone() });
     }
 
     /// The recording stopped (or OBS closed): each open alert says so, once, and every watch ends.
@@ -554,7 +554,7 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
                 "caption": post.text,
                 "files": [{"role": "image", "file": post.image, "name": name, "mime": "image/png"}],
                 "by": "obs",
-                "post": {"thread_id": post.thread, "text": post.text},
+                "post": {"channel_id": post.channel, "text": post.text},
             });
             let mut last = None;
             for attempt in 0..3 {
@@ -565,7 +565,7 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
                 match h.request_timeout(&publish, Duration::from_secs(120)) {
                     Ok(answer) => {
                         let message = answer.post.as_option().map(|p| p.id.as_str()).unwrap_or("?");
-                        h.log(format!("posted {} in thread {}: message {message}", post.asset, post.thread));
+                        h.log(format!("posted {} in channel {}: message {message}", post.asset, post.channel));
                         last = None;
                         break;
                     }
@@ -573,7 +573,7 @@ fn publisher(h: Handle, status: Arc<Mutex<Status>>) -> Sender<Post> {
                 }
             }
             if let Some(e) = &last {
-                h.log(format!("couldn't post {} in thread {}: {e}", post.asset, post.thread));
+                h.log(format!("couldn't post {} in channel {}: {e}", post.asset, post.channel));
             }
             lock(&status).posted = last.map(|e| format!("the last post didn't go out: {e}"));
         }
@@ -627,10 +627,10 @@ fn health(st: &Status) -> Vec<Part> {
         )
     } else if let Some(since) = &st.stalled {
         (State::Failing, format!("the recording hasn't grown since {}", words::clock(since.at)))
-    } else if st.thread.is_none() {
+    } else if st.channel.is_none() {
         (
             State::Failing,
-            "no thread to post alerts in: set `thread` in ~/.config/pointman/extensions/obs/config.toml".into(),
+            "no channel to post alerts in: set `channel` in ~/.config/pointman/extensions/obs/config.toml".into(),
         )
     } else if st.mention.is_empty() {
         (
@@ -690,13 +690,13 @@ fn status_text(st: &Status, machine: &str, mention: &str) -> String {
             }
         }
     }
-    lines.push(match st.thread {
+    lines.push(match st.channel {
         Some(t) if mention.is_empty() => format!(
-            "Alerts go to thread {t}, mentioning nobody, so nobody is told: set `mention` in \
+            "Alerts go to channel {t}, mentioning nobody, so nobody is told: set `mention` in \
              ~/.config/pointman/extensions/obs/config.toml."
         ),
-        Some(t) => format!("Alerts go to thread {t}, mentioning {mention}."),
-        None => "No thread is set for alerts: set `thread` in ~/.config/pointman/extensions/obs/config.toml.".into(),
+        Some(t) => format!("Alerts go to channel {t}, mentioning {mention}."),
+        None => "No channel is set for alerts: set `channel` in ~/.config/pointman/extensions/obs/config.toml.".into(),
     });
     lines.join("\n")
 }
@@ -729,7 +729,7 @@ fn main() -> anyhow::Result<()> {
             "recording": snapshot.recording,
             "scene": snapshot.scene,
             "watching": snapshot.watching.iter().map(|(n, shows, state)| json!({"source": n, "shows": shows, "state": state})).collect::<Vec<_>>(),
-            "thread": snapshot.thread,
+            "channel": snapshot.channel,
         }))
     });
 
@@ -746,7 +746,7 @@ fn main() -> anyhow::Result<()> {
     ext.on(move |fix: HealthFixRequest| {
         let message = match fix.part.as_str() {
             "obs" if fix.action == Action::Auth => {
-                "Add OBS's WebSocket password with /obs add in any thread: the app opens a \
+                "Add OBS's WebSocket password with /obs add in any channel: the app opens a \
                  form, so it never goes in a post. It's in OBS › Tools › WebSocket Server \
                  Settings › Show Connect Info."
                     .to_string()
