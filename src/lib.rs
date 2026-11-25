@@ -1,5 +1,5 @@
 //! OBS for Pointman: a recording watchdog. While OBS records, it holds each screen capture's picture
-//! (obs-websocket's GetSourceScreenshot) against the real screen, and says so in a thread when the
+//! (obs-websocket's GetSourceScreenshot) against the real screen, and says so in a channel when the
 //! picture stops while the screen moves. main.rs runs it under the node; the parts are here so the
 //! tests can drive them.
 
