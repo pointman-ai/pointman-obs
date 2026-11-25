@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "obs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "base64",
